@@ -14,7 +14,7 @@ env:
   ENABLE_FAST_DEPLOYS: 'true'
   PYTHON_VERSION: '3.10'
   DAGSTER_CLOUD_FILE: 'dagster_cloud.yaml'
-  DAGSTER_PROJECT_NAME: 'serverless_with_dbt'
+  DAGSTER_PROJECT_NAME: 'quickstart_etl'
 
 jobs:
   dagster_cloud_default_deploy:
