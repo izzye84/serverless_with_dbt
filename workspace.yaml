@@ -1,0 +1,3 @@
+load_from:
+  - python_package: quickstart_etl.definitions
+
