@@ -78,19 +78,29 @@
      ```
 
 5. **Update GitHub Action**
-   - Add a "Prepare dbt project for deployment" step just before the "Build and upload Docker image" step:
+   - Add a "Prepare dbt project for deployment" step just after the "Initialize build session" step:
      ```yaml
      - name: Prepare DBT project for deployment
        if: steps.prerun.outputs.result == 'pex-deploy'
        run: |
          python -m pip install pip --upgrade
          cd project-repo
-         pip install . --upgrade --upgrade-strategy eager                                                 ## Install the Python dependencies from the setup.py file, ex: dbt-core and dbt-duckdb
+         pip install . --upgrade --upgrade-strategy eager               ## Install the Python dependencies from the setup.py file, ex: dbt-core and dbt-duckdb
          dagster-dbt project prepare-and-package --file ${{ env.DAGSTER_PROJECT_NAME }}/project.py
        shell: bash
      ```
-   - Note: You'll need to add dbt variables/secrets in GitHub that correspond to the environment variables in your `profiles.yml`
-     - These credentials are used to create the `manifest.json`
+   - Note: you may need to include default/dummy credentials in your `profiles.yml` to ensure your project parses correctly although [`dbt parse`](https://docs.getdbt.com/docs/supported-data-platformshttps://docs.getdbt.com/reference/commands/parse) doesn't connect to your warehouse
+     - For example:
+       ```yaml
+       my_profile:
+         target: dev
+         outputs:
+           dev:
+             type: snowflake
+             account: "{{ env_var('SNOWFLAKE_ACCOUNT', 'dummy-account') }}"
+             user: "{{ env_var('SNOWFLAKE_USER', 'dummy-user') }}"
+             password: "{{ env_var('SNOWFLAKE_PASSWORD', 'dummy-password') }}"
+       ```
 
 6. **Testing**
    - Test the dbt Core integration locally using `dagster dev`
