@@ -1,55 +1,97 @@
-# Dagster Cloud Serverless Deployment Quickstart
+# Using dbt with Dagster's Serverless deployment
 
-> :point_right: You do not need to use this repo to use Dagster Cloud Serverless. When you create an account on Dagster Cloud, it creates a repo for you with the GitHub actions installed. If you want to deploy another project you can use the "Add code locations" button on the Deployments page. This repo provides an alternative way to create a project linked to Dagster Cloud serverless.
+1. **Project Setup**
+   - Copy your dbt project into the root of your Dagster repository
+   - Add `profiles.yml` to the root of your dbt project
+   - Update the `profiles.yml` with the appropriate [`dbt adapter`](https://docs.getdbt.com/docs/supported-data-platforms) connection info
+     - We recommend using environment variables—[see example configuration](https://github.com/dagster-io/hooli-data-eng-pipelines/blob/master/dbt_project/profiles.yml)
 
-Welcome to your Dagster Cloud sample code repo. Here, you can find the code that's being deployed to your Dagster Cloud instance. For more in-depth information, check out our [Serverless](https://docs.dagster.io/dagster-cloud/deployment/serverless) docs.
+2. **Update Dependencies**
+   - Add the following packages to your `setup.py`:
+     - `dagster-dbt`
+     - `dbt-<your_adapter>`
+   - Add the following package_data config to the `setup.py`:
 
-Pushing to production will automatically kick off a [workflow](./.github/workflows/dagster-plus-deploy.yml) which will redeploy your code to your `prod` deployment.
+     ```python
+     from setuptools import find_packages, setup
 
-Creating a pull request will kick off a [workflow](./.github/workflows/dagster-plus-deploy.yml) which will create a new [**Branch Deployment**](https://docs.dagster.io/dagster-cloud/developing-testing/branch-deployments), an ephemeral deployment where you can test your changes.
+     setup(
+         name="my_example_dagster_project",
+         version="0.0.1",
+         packages=find_packages(),
+         package_data={
+             "my-dagster-code-location": [
+                 "dbt-project/**/*",
+             ],
+         },
+         ...
+     ```
 
-# Setting up Quickstart Template Manually
+3. **Configure the `dagster-dbt` (dbt Core) integration**
+   - Create a `project.py` file with the following code to your existing code location:
+  
+     ```python
+     from pathlib import Path
 
-If you had Dagster Cloud clone and set up this repo for you, no need to follow these instructions.
+     from dagster_dbt import DbtProject
+      
+     my_dbt_project = DbtProject(
+         project_dir=Path(__file__).joinpath("..", "..", "my_dbt_project").resolve(),
+         packaged_project_dir=Path(__file__).joinpath("..", "dbt-project").resolve(),
+     )
+     my_dbt_project.prepare_if_dev()
+     ```
 
-Click the `Use this Template` button and provide details for your new repo.
+   - Be sure to update the `project_dir` variable with your dbt project name
 
-<img width="953" alt="Screen Shot 2022-07-06 at 7 24 02 AM" src="https://user-images.githubusercontent.com/10215173/177577141-b6a91585-a276-49d3-b66b-e47bd26665a0.png">
+4. **Create dbt Assets**
+   - Either:
+     - Copy the provided `assets.py` file, or
+    
+     ```python
+     from dagster import AssetExecutionContext
+     from dagster_dbt import DbtCliResource, dbt_assets
+    
+     from .project import my_dbt_project
+    
+    
+     @dbt_assets(manifest=my_dbt_project.manifest_path)
+     def my_dbt_assets(context: AssetExecutionContext, dbt: DbtCliResource):
+         yield from dbt.cli(["build"], context=context).stream()  
+     ```
+   
+     - Add the `dbt_assets` code to an existing asset file
+   - Ensure the dbt assets and resource are included with your other asset definitions:
+  
+     ```python
+     from dagster import Definitions
+     from dagster_dbt import DbtCliResource
+     from .assets import my_dbt_assets
+     from .project import my_dbt_project
+     
+     defs = Definitions(
+         assets=[my_dbt_assets],
+         resources={
+             "dbt": DbtCliResource(project_dir=my_dbt_project),
+         },
+     )
+     ```
 
-## Set up secrets
+5. **Update GitHub Action**
+   - Add a "Prepare dbt project for deployment" step just before the "Build and upload Docker image" step:
+     ```yaml
+     - name: Prepare DBT project for deployment
+       if: steps.prerun.outputs.result == 'pex-deploy'
+       run: |
+         python -m pip install pip --upgrade
+         cd project-repo
+         pip install . --upgrade --upgrade-strategy eager                                                 ## Install the Python dependencies from the setup.py file, ex: dbt-core and dbt-duckdb
+         dagster-dbt project prepare-and-package --file ${{ env.DAGSTER_PROJECT_NAME }}/project.py
+       shell: bash
+     ```
+   - Note: You'll need to add dbt variables/secrets in GitHub that correspond to the environment variables in your `profiles.yml`
+     - These credentials are used to create the `manifest.json`
 
-Set up secrets on your newly created repository by navigating to the `Settings` panel in your repo, clicking `Secrets` on the sidebar, and selecting `Actions`. Then, click `New repository secret`.
-
-| Name                      | Description                                                                                                                                                                                                     |
-| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `DAGSTER_CLOUD_API_TOKEN` | An agent token, for more details see [the Dagster Cloud docs](https://docs.dagster.cloud/auth#managing-user-and-agent-tokens).                                                                                  |
-
-## Update workflows
-
-Replace the `ORGANIZATION_NAME` in `.github/workflows/dagster-plus-deploy.yml` with your Dagster cloud organization name:
-
-```
-  DAGSTER_CLOUD_URL: "https://ORGANIZATION_NAME.dagster.cloud"
-```
-
-## Verify Builds are Successful
-
-At this point, the Workflow should complete successfully. If builds are failing, ensure that your secrets are properly set and that your deployment has finished activating.
-
-## Next Steps
-
-Now that your GitHub repository is setup with CI/CD to deploy to Dagster Cloud, you can add your own Dagster code. To run this project locally with dagit first install its local developement dependencies
-
-```bash
-pip install -e ".[dev]"
-```
-
-Once you've done this, you can run:
-
-```
-dagit
-```
-
-to view this repo in Dagster's UI, Dagit.
-
-You can also copy any existing [Dagster examples or quickstart projects](https://github.com/dagster-io/dagster/tree/master/examples) into this GitHub repository.
+6. **Testing**
+   - Test the dbt Core integration locally using `dagster dev`
+   - If everything works as expected, open a Pull Request
